@@ -1,16 +1,26 @@
-FROM golang:1.10 AS build
-WORKDIR /go/src/github.com/nrmitchi/k8s-controller-sidecars
-RUN git clone --single-branch -b master \
-  https://github.com/nrmitchi/k8s-controller-sidecars.git /go/src/github.com/nrmitchi/k8s-controller-sidecars/
-RUN go get -v
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -a -installsuffix cgo -o main .
+# syntax=docker/dockerfile:1.4
+FROM golang:1.18-alpine AS build
 
-RUN apt-get update && apt-get install -y upx
-RUN upx main
+ARG SOURCE_REPOSITORY=https://github.com/Riskified/k8s-controller-sidecars
 
-RUN mkdir -p /empty
+RUN <<EOF
+  set -eux
+  apk add --no-cache \
+		git \
+    upx
+EOF
 
-FROM scratch
-COPY --from=build /go/src/github.com/nrmitchi/k8s-controller-sidecars/main /
-COPY --from=build /empty /tmp
-CMD ["/main"]
+WORKDIR /go/src/k8s-controller-sidecars
+
+RUN <<EOF
+  set -eux
+  git clone --single-branch -b main ${SOURCE_REPOSITORY} /go/src/k8s-controller-sidecars
+  go mod download -x
+
+  CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -a -installsuffix cgo -o sidecars-controller .
+  upx sidecars-controller
+EOF
+
+FROM alpine:3.16 AS app
+COPY --from=build /go/src/k8s-controller-sidecars/sidecars-controller /
+CMD ["/sidecars-controller"]
